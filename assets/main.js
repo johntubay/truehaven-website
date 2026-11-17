@@ -252,6 +252,88 @@
       tl.addEventListener('click', function(e){ if (moved){ e.preventDefault(); e.stopPropagation(); } }, true);
     });
 
+    // service-area map: size each label card to fit its text (re-run when fonts load or the layout changes)
+    root.querySelectorAll('.map').forEach(function(map){
+      if (map.dataset.chips) return; map.dataset.chips = 1;
+      function size(){
+        map.querySelectorAll('.chip').forEach(function(c){
+          var r = c.querySelector('rect'), x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+          c.querySelectorAll('text').forEach(function(t){
+            var b = t.getBBox(); x1 = Math.min(x1, b.x); y1 = Math.min(y1, b.y); x2 = Math.max(x2, b.x + b.width); y2 = Math.max(y2, b.y + b.height);
+          });
+          if (!r || !isFinite(x1)) return;
+          r.setAttribute('x', x1 - 10); r.setAttribute('y', y1 - 6); r.setAttribute('width', x2 - x1 + 20); r.setAttribute('height', y2 - y1 + 12); r.setAttribute('rx', 10);
+        });
+        map.classList.add('chips-ready');
+      }
+      size();
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(size);
+      var t; window.addEventListener('resize', function(){ clearTimeout(t); t = setTimeout(size, 150); });
+    });
+
+    // service-area explorer: pick a city (dropdown or pin) to zoom the map and update the info card
+    root.querySelectorAll('.explorer').forEach(function(ex){
+      if (ex.dataset.bound) return; ex.dataset.bound = 1;
+      var map = ex.querySelector('.map'), svg = map.querySelector('svg'), sel = ex.querySelector('#ex-city');
+      var reset = ex.querySelector('.ex-reset'), field = function(k){ return ex.querySelector('[data-ex="' + k + '"]'); };
+      var HOME = [0, -110, 560, 820], ZOOM = 2.1, cur = HOME.slice(), anim;
+      // labels, pins and shields keep their on-screen size while the map zooms
+      var keep = [];
+      map.querySelectorAll('.pz').forEach(function(g){ keep.push([g, +g.dataset.x, +g.dataset.y]); });
+      map.querySelectorAll('.shield').forEach(function(g){ var r = g.querySelector('rect'); keep.push([g, +r.getAttribute('x') + r.getAttribute('width') / 2, +r.getAttribute('y') + 9]); });
+      map.querySelectorAll('.clbl').forEach(function(t){ keep.push([t, +t.getAttribute('x'), +t.getAttribute('y')]); });
+      function draw(vb){
+        cur = vb; svg.setAttribute('viewBox', vb.join(' '));
+        var k = vb[2] / HOME[2];
+        keep.forEach(function(e){ e[0].setAttribute('transform', k === 1 ? '' : 'translate(' + e[1] + ' ' + e[2] + ') scale(' + k + ') translate(' + (-e[1]) + ' ' + (-e[2]) + ')'); });
+      }
+      function fly(to){
+        cancelAnimationFrame(anim);
+        if (reduce){ draw(to); return; }
+        var from = cur.slice(), t0 = performance.now(), dur = 900;
+        (function step(now){
+          var p = Math.min(1, (now - t0) / dur), e = p < .5 ? 4*p*p*p : 1 - Math.pow(-2*p + 2, 3) / 2;
+          draw(from.map(function(v, i){ return v + (to[i] - v) * e; }));
+          if (p < 1) anim = requestAnimationFrame(step);
+        })(t0);
+      }
+      function pick(href){
+        var opt = sel.querySelector('option[value="' + href + '"]') || sel.options[0];
+        sel.value = opt.value;
+        ['kicker','name','meta','text'].forEach(function(k){ field(k).textContent = opt.dataset[k]; });
+        field('cta').href = opt.dataset.href; field('ctatext').textContent = opt.dataset.cta;
+        field('view').textContent = opt.value === 'all' ? 'Full service area' : opt.dataset.name;
+        map.querySelectorAll('.pin').forEach(function(p){ p.classList.toggle('sel', p.dataset.href === opt.value); });
+        map.classList.toggle('has-sel', opt.value !== 'all'); reset.hidden = opt.value === 'all';
+        var pz = map.querySelector('.pin[data-href="' + opt.value + '"] .pz');
+        if (!pz) { fly(HOME); return; }
+        var w = HOME[2] / ZOOM, h = HOME[3] / ZOOM;
+        fly([+pz.dataset.x - w / 2, +pz.dataset.y - h / 2, w, h]);
+      }
+      sel.addEventListener('change', function(){ pick(sel.value); });
+      reset.addEventListener('click', function(){ pick('all'); sel.focus(); });
+      map.querySelectorAll('a.pin').forEach(function(p){
+        p.addEventListener('click', function(e){ if (!p.dataset.href) return; e.preventDefault(); pick(p.dataset.href); });
+      });
+      // hovering a city chip lights up its pin
+      ex.parentNode.querySelectorAll('.ex-chips a').forEach(function(a){
+        var pin = map.querySelector('.pin[data-href="' + a.getAttribute('href') + '"]'); if (!pin) return;
+        a.addEventListener('mouseenter', function(){ pin.classList.add('on'); }); a.addEventListener('mouseleave', function(){ pin.classList.remove('on'); });
+        a.addEventListener('focus', function(){ pin.classList.add('on'); }); a.addEventListener('blur', function(){ pin.classList.remove('on'); });
+      });
+    });
+
+    // service-area map: hovering or focusing a city link highlights its pin
+    root.querySelectorAll('.areas').forEach(function(a){
+      var map = a.querySelector('.map'); if (!map || a.dataset.bound) return; a.dataset.bound = 1;
+      a.querySelectorAll('.city-list a').forEach(function(link){
+        var pin = map.querySelector('.pin[data-href="' + link.getAttribute('href') + '"]'); if (!pin) return;
+        var on = function(){ pin.classList.add('on'); }, off = function(){ pin.classList.remove('on'); };
+        link.addEventListener('mouseenter', on); link.addEventListener('mouseleave', off);
+        link.addEventListener('focus', on); link.addEventListener('blur', off);
+      });
+    });
+
     root.querySelectorAll('.gallery').forEach(function(g){
       if (g.dataset.bound) return; g.dataset.bound = 1;
       var figs = Array.prototype.slice.call(g.querySelectorAll('figure'));
